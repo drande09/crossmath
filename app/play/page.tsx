@@ -43,6 +43,7 @@ function GameContent() {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [placed, setPlaced] = useState<Map<string, number>>(new Map());
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
+  const [selectedBank, setSelectedBank] = useState<number | null>(null); // index into bankRemaining
   const [checkResults, setCheckResults] = useState<Map<string, boolean> | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [hintsUsed, setHintsUsed] = useState(0);
@@ -54,6 +55,7 @@ function GameContent() {
     setPuzzle(p);
     setPlaced(new Map());
     setSelectedCell(null);
+    setSelectedBank(null);
     setCheckResults(null);
     setIsComplete(false);
     setHintsUsed(0);
@@ -73,40 +75,18 @@ function GameContent() {
     if (idx !== -1) bankRemaining.splice(idx, 1);
   }
 
-  const handleCellTap = (row: number, col: number) => {
-    const cell = puzzle.grid[row][col];
-    if (cell.type !== 'number' || cell.isGiven) return;
-
-    const key = `${row},${col}`;
-
-    // If cell has a placed number, remove it
-    if (placed.has(key)) {
-      const newPlaced = new Map(placed);
-      newPlaced.delete(key);
-      setPlaced(newPlaced);
-      setCheckResults(null);
-      setSelectedCell(null);
-      return;
-    }
-
-    setSelectedCell(key);
-    setCheckResults(null);
-  };
-
-  const handleBankTap = (value: number, bankIndex: number) => {
-    if (!selectedCell) return;
-
+  const placeNumber = (cellKey: string, value: number) => {
     const newPlaced = new Map(placed);
-    newPlaced.set(selectedCell, value);
+    newPlaced.set(cellKey, value);
     setPlaced(newPlaced);
-    setAnimatingCell(selectedCell);
+    setAnimatingCell(cellKey);
     setTimeout(() => setAnimatingCell(null), 300);
     setSelectedCell(null);
+    setSelectedBank(null);
     setCheckResults(null);
 
     // Check if all blanks filled
     if (newPlaced.size === puzzle.solution.size) {
-      // Auto-check
       let allCorrect = true;
       const results = new Map<string, boolean>();
       for (const [key, correctVal] of puzzle.solution) {
@@ -118,6 +98,52 @@ function GameContent() {
       setCheckResults(results);
       if (allCorrect) setIsComplete(true);
     }
+  };
+
+  const handleCellTap = (row: number, col: number) => {
+    const cell = puzzle.grid[row][col];
+    if (cell.type !== 'number' || cell.isGiven) return;
+
+    const key = `${row},${col}`;
+
+    // If cell has a placed number, remove it back to bank
+    if (placed.has(key)) {
+      const newPlaced = new Map(placed);
+      newPlaced.delete(key);
+      setPlaced(newPlaced);
+      setCheckResults(null);
+      setSelectedCell(null);
+      setSelectedBank(null);
+      return;
+    }
+
+    // If a bank number is already selected, place it here
+    if (selectedBank !== null) {
+      placeNumber(key, bankRemaining[selectedBank]);
+      return;
+    }
+
+    // Otherwise, select this cell and wait for bank tap
+    setSelectedCell(key);
+    setSelectedBank(null);
+    setCheckResults(null);
+  };
+
+  const handleBankTap = (value: number, bankIndex: number) => {
+    // If a cell is already selected, place this number there
+    if (selectedCell) {
+      placeNumber(selectedCell, value);
+      return;
+    }
+
+    // Otherwise, select this bank number and wait for cell tap
+    if (selectedBank === bankIndex) {
+      setSelectedBank(null); // deselect on re-tap
+    } else {
+      setSelectedBank(bankIndex);
+    }
+    setSelectedCell(null);
+    setCheckResults(null);
   };
 
   const handleCheck = () => {
@@ -199,6 +225,10 @@ function GameContent() {
     } else if (selectedCell === key) {
       bg = 'bg-indigo-100';
       border = 'border-indigo-500 border-3';
+    } else if (selectedBank !== null) {
+      // A bank tile is selected — highlight empty cells as drop targets
+      bg = 'bg-indigo-50';
+      border = 'border-dashed border-indigo-300';
     } else {
       bg = 'bg-yellow-50';
       border = 'border-dashed border-yellow-300';
@@ -311,19 +341,22 @@ function GameContent() {
       {!isComplete && (
         <div className="w-full mb-4">
           <div className="text-xs text-gray-400 mb-2 text-center font-bold">
-            {selectedCell ? 'Tap a number to place it' : 'Tap an empty cell first'}
+            {selectedCell
+              ? 'Now tap a number'
+              : selectedBank !== null
+                ? 'Now tap a cell'
+                : 'Tap a number or an empty cell'}
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             {bankRemaining.map((num, idx) => (
               <button
                 key={`bank-${idx}`}
                 onClick={() => handleBankTap(num, idx)}
-                disabled={!selectedCell}
                 className={`
-                  w-12 h-12 rounded-xl font-bold text-lg transition-all
-                  ${selectedCell
-                    ? 'bg-indigo-500 text-white shadow-md active:scale-90 hover:bg-indigo-600'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}
+                  w-12 h-12 rounded-xl font-bold text-lg transition-all active:scale-90
+                  ${selectedBank === idx
+                    ? 'bg-indigo-700 text-white shadow-lg ring-2 ring-indigo-300 scale-110'
+                    : 'bg-indigo-500 text-white shadow-md hover:bg-indigo-600'}
                 `}
               >
                 {num}

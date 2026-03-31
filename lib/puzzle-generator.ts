@@ -231,27 +231,38 @@ function chooseBlanks(
   const blanks = new Set<string>();
 
   if (difficulty === 'easy') {
-    // One blank per equation, each solvable independently
+    // One blank per equation — prefer operands (pos 0 or 2), never just the result
     for (let eqIdx = 0; eqIdx < equations.length; eqIdx++) {
-      const positions = [0, 2, 4].map(p => {
+      const operandKeys = [0, 2].map(p => {
         const [r, c] = equations[eqIdx][p];
         return `${r},${c}`;
       });
-      // Pick a position that isn't already blank in another equation
-      const candidates = positions.filter(p => !blanks.has(p));
-      if (candidates.length > 0) {
-        blanks.add(candidates[randInt(0, candidates.length - 1)]);
+      const resultKey = (() => {
+        const [r, c] = equations[eqIdx][4];
+        return `${r},${c}`;
+      })();
+      // Prefer operands that aren't already blank elsewhere
+      const operandCandidates = operandKeys.filter(p => !blanks.has(p));
+      if (operandCandidates.length > 0) {
+        blanks.add(operandCandidates[randInt(0, operandCandidates.length - 1)]);
+      } else if (!blanks.has(resultKey)) {
+        blanks.add(resultKey);
       }
     }
   } else if (difficulty === 'medium') {
     // 1-2 blanks per equation, but avoid ambiguous swaps
     for (let eqIdx = 0; eqIdx < equations.length; eqIdx++) {
-      const positions = [0, 2, 4].map(p => {
+      // Prefer starting with an operand blank, not the result
+      const operandKeys = shuffle([0, 2].map(p => {
         const [r, c] = equations[eqIdx][p];
-        return `${r},${c}`;
-      });
-      // Start with 1 blank, maybe add a second if unambiguous
-      const shuffled = shuffle(positions);
+        return { key: `${r},${c}`, posIdx: p };
+      }));
+      const resultEntry = (() => {
+        const [r, c] = equations[eqIdx][4];
+        return { key: `${r},${c}`, posIdx: 4 };
+      })();
+      const positions = [...operandKeys, resultEntry]; // operands first
+      const shuffled = positions.map(p => p.key);
       blanks.add(shuffled[0]);
       // Only add a second blank if it won't create an ambiguous swap
       if (shuffled.length > 1) {
