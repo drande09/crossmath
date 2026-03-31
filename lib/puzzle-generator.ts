@@ -160,10 +160,50 @@ function fillGrid(
   return grid;
 }
 
+function removeAmbiguousBlanks(
+  blanks: Set<string>,
+  equations: [number, number][][],
+  grid: Map<string, number | Operator | '='>,
+) {
+  for (const eq of equations) {
+    const blankPositions: { key: string; posIdx: number; value: number }[] = [];
+    for (const posIdx of [0, 2, 4]) {
+      const [r, c] = eq[posIdx];
+      const key = `${r},${c}`;
+      if (blanks.has(key)) {
+        blankPositions.push({ key, posIdx, value: grid.get(key) as number });
+      }
+    }
+    if (blankPositions.length < 2) continue;
+
+    // Check for swappable pairs
+    const opKey = `${eq[1][0]},${eq[1][1]}`;
+    const op = grid.get(opKey) as string;
+    const isCommutative = op === '+' || op === '×';
+
+    for (let i = 0; i < blankPositions.length; i++) {
+      for (let j = i + 1; j < blankPositions.length; j++) {
+        const a = blankPositions[i];
+        const b = blankPositions[j];
+        // Same value = always ambiguous
+        if (a.value === b.value) {
+          blanks.delete(b.key);
+          continue;
+        }
+        // Both operands (positions 0,2) + commutative op = ambiguous
+        if (a.posIdx !== 4 && b.posIdx !== 4 && isCommutative) {
+          blanks.delete(b.key);
+        }
+      }
+    }
+  }
+}
+
 function chooseBlanks(
   equations: [number, number][][],
   difficulty: Difficulty,
   template: Template,
+  grid: Map<string, number | Operator | '='>,
 ): Set<string> {
   // Collect all number cells
   const numberCells: string[] = [];
@@ -204,26 +244,52 @@ function chooseBlanks(
       }
     }
   } else if (difficulty === 'medium') {
-    // 1-2 blanks per equation
+    // 1-2 blanks per equation, but avoid ambiguous swaps
     for (let eqIdx = 0; eqIdx < equations.length; eqIdx++) {
       const positions = [0, 2, 4].map(p => {
         const [r, c] = equations[eqIdx][p];
         return `${r},${c}`;
       });
+      // Start with 1 blank, maybe add a second if unambiguous
       const shuffled = shuffle(positions);
-      const count = Math.min(2, shuffled.length);
-      for (let i = 0; i < count; i++) {
-        blanks.add(shuffled[i]);
+      blanks.add(shuffled[0]);
+      // Only add a second blank if it won't create an ambiguous swap
+      if (shuffled.length > 1) {
+        const blankVals = [shuffled[0], shuffled[1]].map(k => grid.get(k) as number);
+        // If the two blank values are different AND the operator is not
+        // commutative (or the blanks are operand+result not both operands),
+        // it's safe to have two blanks
+        const posIndices = [0, 2, 4];
+        const blankPosIndices = [shuffled[0], shuffled[1]].map(k => {
+          for (const p of posIndices) {
+            const [r, c] = equations[eqIdx][p];
+            if (`${r},${c}` === k) return p;
+          }
+          return -1;
+        });
+        const bothOperands = blankPosIndices.includes(0) && blankPosIndices.includes(2);
+        const opKey = `${equations[eqIdx][1][0]},${equations[eqIdx][1][1]}`;
+        const op = grid.get(opKey) as string;
+        const isCommutative = op === '+' || op === '×';
+        // Ambiguous if: both are operands, op is commutative, and values differ
+        // OR: any two blanks with same value (swapping identical = same result)
+        const sameValues = blankVals[0] === blankVals[1];
+        const ambiguous = sameValues || (bothOperands && isCommutative);
+        if (!ambiguous) {
+          blanks.add(shuffled[1]);
+        }
       }
     }
   } else {
-    // Hard: most numbers are blank
+    // Hard: most numbers are blank, but verify uniqueness
     const shuffled = shuffle(numberCells);
     // Leave only ~30% as given
     const givenCount = Math.max(2, Math.ceil(numberCells.length * 0.3));
     for (let i = givenCount; i < shuffled.length; i++) {
       blanks.add(shuffled[i]);
     }
+    // Remove blanks that create ambiguous equations
+    removeAmbiguousBlanks(blanks, equations, grid);
   }
 
   return blanks;
@@ -266,7 +332,7 @@ function buildPuzzle(
   grade: number,
   difficulty: Difficulty,
 ): Puzzle {
-  const blanks = chooseBlanks(equations, difficulty, template);
+  const blanks = chooseBlanks(equations, difficulty, template, filledGrid);
   const solution = new Map<string, number>();
   const answerBank: number[] = [];
 

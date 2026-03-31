@@ -275,6 +275,11 @@ function GameContent() {
       >
         {puzzle.grid.flat().map((cell) => {
           const key = `${cell.row},${cell.col}`;
+
+          if (cell.type === 'wall') {
+            return <div key={key} className="aspect-square" />;
+          }
+
           const displayValue = cell.isGiven
             ? cell.value
             : placed.has(key)
@@ -287,16 +292,16 @@ function GameContent() {
             <button
               key={key}
               onClick={() => handleCellTap(cell.row, cell.col)}
-              disabled={cell.type === 'wall' || cell.isGiven || isComplete}
+              disabled={cell.isGiven || isComplete}
               className={`
                 aspect-square rounded-lg flex items-center justify-center
                 text-base transition-all
                 ${getCellStyle(cell)}
-                ${cell.type === 'wall' ? 'cursor-default' : cell.isGiven ? 'cursor-default' : 'cursor-pointer active:scale-95'}
+                ${cell.isGiven ? 'cursor-default' : 'cursor-pointer active:scale-95'}
               `}
               style={{ minHeight: '48px', minWidth: '48px' }}
             >
-              {cell.type === 'wall' ? '' : (displayValue ?? '')}
+              {displayValue ?? ''}
             </button>
           );
         })}
