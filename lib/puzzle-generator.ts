@@ -232,7 +232,15 @@ function chooseBlanks(
 
   if (difficulty === 'easy') {
     // One blank per equation — prefer operands (pos 0 or 2), never just the result
+    // Process equations in order, being careful about shared cells
     for (let eqIdx = 0; eqIdx < equations.length; eqIdx++) {
+      // Check if this equation already has a blank from a previous equation's shared cell
+      const existingBlanks = [0, 2, 4].filter(p => {
+        const [r, c] = equations[eqIdx][p];
+        return blanks.has(`${r},${c}`);
+      });
+      if (existingBlanks.length > 0) continue; // already has a blank, skip
+
       const operandKeys = [0, 2].map(p => {
         const [r, c] = equations[eqIdx][p];
         return `${r},${c}`;
@@ -241,10 +249,23 @@ function chooseBlanks(
         const [r, c] = equations[eqIdx][4];
         return `${r},${c}`;
       })();
-      // Prefer operands that aren't already blank elsewhere
-      const operandCandidates = operandKeys.filter(p => !blanks.has(p));
-      if (operandCandidates.length > 0) {
-        blanks.add(operandCandidates[randInt(0, operandCandidates.length - 1)]);
+      // Prefer operands that won't cause another equation to have 2+ blanks
+      const safeCandidates = operandKeys.filter(k => {
+        // Check: if we blank this cell, does any equation end up with 2+ blanks?
+        const testBlanks = new Set(blanks);
+        testBlanks.add(k);
+        for (const eq of equations) {
+          let count = 0;
+          for (const p of [0, 2, 4]) {
+            const [r, c] = eq[p];
+            if (testBlanks.has(`${r},${c}`)) count++;
+          }
+          if (count > 1) return false;
+        }
+        return true;
+      });
+      if (safeCandidates.length > 0) {
+        blanks.add(safeCandidates[randInt(0, safeCandidates.length - 1)]);
       } else if (!blanks.has(resultKey)) {
         blanks.add(resultKey);
       }
