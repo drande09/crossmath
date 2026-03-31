@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, useCallback, useEffect, Suspense } from 'react';
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react';
 import { generatePuzzle } from '@/lib/puzzle-generator';
 import { Puzzle, Cell, Difficulty } from '@/lib/types';
 
@@ -34,6 +34,18 @@ function Confetti() {
   );
 }
 
+// Drag state tracked via ref to avoid re-renders during drag
+interface DragState {
+  active: boolean;
+  value: number;
+  bankIndex: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  moved: boolean; // true once pointer moves enough to count as drag
+}
+
 function GameContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -43,12 +55,18 @@ function GameContent() {
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [placed, setPlaced] = useState<Map<string, number>>(new Map());
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
-  const [selectedBank, setSelectedBank] = useState<number | null>(null); // index into bankRemaining
+  const [selectedBank, setSelectedBank] = useState<number | null>(null);
   const [checkResults, setCheckResults] = useState<Map<string, boolean> | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [hintsUsed, setHintsUsed] = useState(0);
   const [hintCell, setHintCell] = useState<string | null>(null);
   const [animatingCell, setAnimatingCell] = useState<string | null>(null);
+  const [dragDisplay, setDragDisplay] = useState<{ x: number; y: number; value: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const dragRef = useRef<DragState | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const cellRefsMap = useRef<Map<string, HTMLElement>>(new Map());
 
   const newPuzzle = useCallback(() => {
     const p = generatePuzzle(grade, difficulty);
@@ -60,6 +78,9 @@ function GameContent() {
     setIsComplete(false);
     setHintsUsed(0);
     setHintCell(null);
+    setDragDisplay(null);
+    setDropTarget(null);
+    dragRef.current = null;
   }, [grade, difficulty]);
 
   useEffect(() => { newPuzzle(); }, [newPuzzle]);
@@ -67,7 +88,6 @@ function GameContent() {
   if (!puzzle) return <div className="p-8 text-center text-gray-400">Loading...</div>;
 
   const bankAvailable = [...puzzle.answerBank];
-  // Remove placed values from bank
   const placedValues = Array.from(placed.values());
   const bankRemaining = [...bankAvailable];
   for (const v of placedValues) {
@@ -85,7 +105,6 @@ function GameContent() {
     setSelectedBank(null);
     setCheckResults(null);
 
-    // Check if all blanks filled
     if (newPlaced.size === puzzle.solution.size) {
       let allCorrect = true;
       const results = new Map<string, boolean>();
@@ -100,13 +119,86 @@ function GameContent() {
     }
   };
 
+  // --- Drag handlers ---
+  const findCellAtPoint = (x: number, y: number): string | null => {
+    for (const [key, el] of cellRefsMap.current) {
+      const rect = el.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        // Check it's a valid drop target (blank number cell, not already filled)
+        const [r, c] = key.split(',').map(Number);
+        const cell = puzzle.grid[r][c];
+        if (cell.type === 'number' && !cell.isGiven && !placed.has(key)) {
+          return key;
+        }
+      }
+    }
+    return null;
+  };
+
+  const handleDragStart = (value: number, bankIndex: number, e: React.PointerEvent) => {
+    if (isComplete) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = {
+      active: true,
+      value,
+      bankIndex,
+      startX: e.clientX,
+      startY: e.clientY,
+      currentX: e.clientX,
+      currentY: e.clientY,
+      moved: false,
+    };
+  };
+
+  const handleDragMove = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || !drag.active) return;
+    e.preventDefault();
+
+    drag.currentX = e.clientX;
+    drag.currentY = e.clientY;
+
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      drag.moved = true;
+    }
+
+    if (drag.moved) {
+      setDragDisplay({ x: e.clientX, y: e.clientY, value: drag.value });
+      const target = findCellAtPoint(e.clientX, e.clientY);
+      setDropTarget(target);
+    }
+  };
+
+  const handleDragEnd = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || !drag.active) return;
+
+    if (drag.moved) {
+      // Was a drag — try to drop
+      const target = findCellAtPoint(drag.currentX, drag.currentY);
+      if (target) {
+        placeNumber(target, drag.value);
+      }
+    } else {
+      // Was a tap — use tap logic
+      handleBankTap(drag.value, drag.bankIndex);
+    }
+
+    dragRef.current = null;
+    setDragDisplay(null);
+    setDropTarget(null);
+  };
+
+  // --- Tap handlers ---
   const handleCellTap = (row: number, col: number) => {
     const cell = puzzle.grid[row][col];
     if (cell.type !== 'number' || cell.isGiven) return;
 
     const key = `${row},${col}`;
 
-    // If cell has a placed number, remove it back to bank
     if (placed.has(key)) {
       const newPlaced = new Map(placed);
       newPlaced.delete(key);
@@ -117,28 +209,24 @@ function GameContent() {
       return;
     }
 
-    // If a bank number is already selected, place it here
     if (selectedBank !== null) {
       placeNumber(key, bankRemaining[selectedBank]);
       return;
     }
 
-    // Otherwise, select this cell and wait for bank tap
     setSelectedCell(key);
     setSelectedBank(null);
     setCheckResults(null);
   };
 
   const handleBankTap = (value: number, bankIndex: number) => {
-    // If a cell is already selected, place this number there
     if (selectedCell) {
       placeNumber(selectedCell, value);
       return;
     }
 
-    // Otherwise, select this bank number and wait for cell tap
     if (selectedBank === bankIndex) {
-      setSelectedBank(null); // deselect on re-tap
+      setSelectedBank(null);
     } else {
       setSelectedBank(bankIndex);
     }
@@ -156,7 +244,6 @@ function GameContent() {
     }
     setCheckResults(results);
 
-    // Check if all correct
     let allCorrect = true;
     for (const [key, correctVal] of puzzle.solution) {
       if (placed.get(key) !== correctVal) { allCorrect = false; break; }
@@ -165,7 +252,6 @@ function GameContent() {
   };
 
   const handleHint = () => {
-    // Find an unfilled or incorrectly filled blank
     for (const [key, correctVal] of puzzle.solution) {
       if (!placed.has(key) || placed.get(key) !== correctVal) {
         const newPlaced = new Map(placed);
@@ -177,7 +263,6 @@ function GameContent() {
         setTimeout(() => { setAnimatingCell(null); setHintCell(null); }, 1000);
         setCheckResults(null);
 
-        // Check completion
         if (newPlaced.size === puzzle.solution.size) {
           let allCorrect = true;
           for (const [k, v] of puzzle.solution) {
@@ -202,7 +287,6 @@ function GameContent() {
       return 'bg-amber-50 border-amber-200 text-amber-700 font-extrabold text-lg';
     }
 
-    // Number cell
     if (cell.isGiven) {
       bg = 'bg-slate-100';
       textColor = 'text-slate-700 font-extrabold';
@@ -225,8 +309,11 @@ function GameContent() {
     } else if (selectedCell === key) {
       bg = 'bg-indigo-100';
       border = 'border-indigo-500 border-3';
-    } else if (selectedBank !== null) {
-      // A bank tile is selected — highlight empty cells as drop targets
+    } else if (dropTarget === key) {
+      // Drag hovering over this cell
+      bg = 'bg-indigo-200';
+      border = 'border-indigo-500 border-2';
+    } else if (selectedBank !== null || dragDisplay) {
       bg = 'bg-indigo-50';
       border = 'border-dashed border-indigo-300';
     } else {
@@ -246,12 +333,26 @@ function GameContent() {
     return `${bg} border-2 ${border} ${textColor} ${extra}`;
   };
 
-  const gridRows = puzzle.grid.length;
   const gridCols = puzzle.grid[0].length;
 
   return (
     <main className="min-h-screen flex flex-col items-center px-3 py-4 max-w-lg mx-auto">
       {isComplete && <Confetti />}
+
+      {/* Floating drag tile */}
+      {dragDisplay && (
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: dragDisplay.x - 24,
+            top: dragDisplay.y - 24,
+          }}
+        >
+          <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-bold text-lg flex items-center justify-center shadow-xl opacity-90 scale-110">
+            {dragDisplay.value}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="w-full flex items-center justify-between mb-4">
@@ -294,6 +395,7 @@ function GameContent() {
 
       {/* Puzzle Grid */}
       <div
+        ref={gridRef}
         className="w-full mb-4"
         style={{
           display: 'grid',
@@ -321,6 +423,10 @@ function GameContent() {
           return (
             <button
               key={key}
+              ref={(el) => {
+                if (el) cellRefsMap.current.set(key, el);
+                else cellRefsMap.current.delete(key);
+              }}
               onClick={() => handleCellTap(cell.row, cell.col)}
               disabled={cell.isGiven || isComplete}
               className={`
@@ -345,18 +451,23 @@ function GameContent() {
               ? 'Now tap a number'
               : selectedBank !== null
                 ? 'Now tap a cell'
-                : 'Tap a number or an empty cell'}
+                : dragDisplay
+                  ? 'Drop on a cell'
+                  : 'Tap or drag a number to a cell'}
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             {bankRemaining.map((num, idx) => (
               <button
                 key={`bank-${idx}`}
-                onClick={() => handleBankTap(num, idx)}
+                onPointerDown={(e) => handleDragStart(num, idx, e)}
+                onPointerMove={handleDragMove}
+                onPointerUp={handleDragEnd}
+                onPointerCancel={handleDragEnd}
                 className={`
-                  w-12 h-12 rounded-xl font-bold text-lg transition-all active:scale-90
+                  w-12 h-12 rounded-xl font-bold text-lg transition-all select-none touch-none
                   ${selectedBank === idx
                     ? 'bg-indigo-700 text-white shadow-lg ring-2 ring-indigo-300 scale-110'
-                    : 'bg-indigo-500 text-white shadow-md hover:bg-indigo-600'}
+                    : 'bg-indigo-500 text-white shadow-md hover:bg-indigo-600 active:scale-90'}
                 `}
               >
                 {num}

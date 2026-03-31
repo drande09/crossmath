@@ -1,5 +1,5 @@
 import { Cell, Difficulty, Operator, Puzzle, Template, TemplateChar } from './types';
-import { extractEquations, getTemplatesForConfig } from './puzzle-templates';
+import { extractEquations, getEquationCells, getTemplatesForConfig } from './puzzle-templates';
 
 function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -367,6 +367,8 @@ function buildPuzzle(
   const blanks = chooseBlanks(equations, difficulty, template, filledGrid);
   const solution = new Map<string, number>();
   const answerBank: number[] = [];
+  // Defensive: only cells that belong to an equation should render
+  const equationCells = getEquationCells(template);
 
   const rows = template.length;
   const cols = template[0].length;
@@ -379,7 +381,8 @@ function buildPuzzle(
       const key = `${r},${c}`;
       const value = filledGrid.get(key) ?? null;
 
-      if (tpl === '.') {
+      // Treat orphan cells (not part of any equation) as walls
+      if (tpl === '.' || !equationCells.has(key)) {
         grid[r][c] = { type: 'wall', value: null, isBlank: false, isGiven: false, row: r, col: c };
       } else if (tpl === 'O') {
         grid[r][c] = { type: 'operator', value: value as Operator, isBlank: false, isGiven: true, row: r, col: c };

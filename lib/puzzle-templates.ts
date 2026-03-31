@@ -3,23 +3,9 @@ import { Template, TemplateChar } from './types';
 // Templates define grid layouts
 // N = number, O = operator, E = equals, . = wall
 // Equations read left-to-right and top-to-bottom
+// RULE: Every non-wall cell MUST belong to at least one 5-cell equation (N O N E N)
 
-// 5x5: Two horizontal + two vertical equations crossing
-// Layout:
-//   N O N E N
-//   O . . . O
-//   N . . . N
-//   E . . . E
-//   N . . . N
-const SMALL_CROSS: Template = [
-  ['N','O','N','E','N'],
-  ['O','.','.','.','.'],
-  ['N','.','.','.','.'],
-  ['E','.','.','.','.'],
-  ['N','.','.','.','.'],
-];
-
-// 5x5: Two horizontal equations stacked, sharing a column
+// 5x5: 1 horizontal + 1 vertical, sharing center operand
 //   N O N E N
 //   . . O . .
 //   . . N . .
@@ -33,21 +19,21 @@ const SMALL_T: Template = [
   ['.','.','N','.','.'],
 ];
 
-// Medium: 3 horizontal + 2 vertical, interlocking
-//   N O N E N . .
-//   . . O . O . .
-//   . . N . N . .
-//   . . E . E . .
-//   . . N O N E N
-const MEDIUM_L: Template = [
-  ['N','O','N','E','N','.','.'],
-  ['.','.','O','.','.','.','O'],
-  ['.','.','N','.','.','.','N'],
-  ['.','.','E','.','.','.','E'],
-  ['.','.','N','O','N','E','N'],
+// 5x5: 2 horizontal + 2 vertical, full cross
+//   N O N E N
+//   O . . . .
+//   N . . . .
+//   E . . . .
+//   N . . . .
+const SMALL_CROSS: Template = [
+  ['N','O','N','E','N'],
+  ['O','.','.','.','.'],
+  ['N','.','.','.','.'],
+  ['E','.','.','.','.'],
+  ['N','.','.','.','.'],
 ];
 
-// Medium: 2 horizontal + 3 vertical
+// Medium: 2 horizontal + 2 vertical, sharing corners
 //   N O N E N
 //   O . O . .
 //   N . N . .
@@ -61,7 +47,21 @@ const MEDIUM_GRID: Template = [
   ['N','O','N','E','N'],
 ];
 
-// Large: 4 horizontal + 3 vertical
+// Medium: 2 horizontal + 1 vertical, L-shape
+//   N O N E N . .
+//   . . O . . . .
+//   . . N . . . .
+//   . . E . . . .
+//   . . N O N E N
+const MEDIUM_L: Template = [
+  ['N','O','N','E','N','.','.'],
+  ['.','.','O','.','.','.','.'],
+  ['.','.','N','.','.','.','.'],
+  ['.','.','E','.','.','.','.'],
+  ['.','.','N','O','N','E','N'],
+];
+
+// Large: 2 horizontal + 3 vertical
 //   N O N E N . .
 //   O . O . . . .
 //   N . N O N E N
@@ -78,16 +78,6 @@ const LARGE_GRID: Template = [
   ['.','.','.','.','E','.','.'],
   ['.','.','.','.','N','.','.'],
 ];
-
-// Hard large: more interlocking
-//   N O N E N . .
-//   O . . . O . .
-//   N . . . N . .
-//   E . . . E . .
-//   N O N E N O N
-//   . . . . . . E
-//   . . . . . . N
-// But let me make simpler ones that actually work well
 
 export function getTemplatesForConfig(grade: number, difficulty: string): Template[] {
   if (grade <= 2) {
@@ -139,4 +129,16 @@ export function extractEquations(template: Template): [number, number][][] {
   }
 
   return equations;
+}
+
+// Get the set of all cells that belong to at least one equation
+export function getEquationCells(template: Template): Set<string> {
+  const equations = extractEquations(template);
+  const cells = new Set<string>();
+  for (const eq of equations) {
+    for (const [r, c] of eq) {
+      cells.add(`${r},${c}`);
+    }
+  }
+  return cells;
 }
